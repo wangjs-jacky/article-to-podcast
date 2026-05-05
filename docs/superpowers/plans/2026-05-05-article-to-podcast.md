@@ -4,9 +4,9 @@
 
 **Goal:** 输入 Markdown 文章，自动产出口播风格播客（MP3）和幻灯片讲解视频（MP4），每步生成可编辑中间产物。
 
-**Architecture:** 两个独立子项目通过文件系统交互：`pipeline/`（TypeScript CLI）负责 AI 步骤（脚本改写→幻灯片 JSON→TTS），`remotion-player/`（React/Remotion）负责视频渲染。中间产物保存在根目录 `output/` 下，支持 `--from=N` 从指定步骤重跑。
+**Architecture:** Claude Code skill 直接处理 LLM 步骤（Step 1 & 2）——读取文章后直接写入 `output/script.md` 和 `output/slides.json`，无需 API Key 包装层；TypeScript 脚本只处理 Step 3（TTS 合成）和 Step 4（Remotion 渲染），由 skill 通过 Bash 调用。`--from=N` 逻辑由 skill 判断中间产物是否存在来实现。
 
-**Tech Stack:** Node.js + TypeScript + tsx，Anthropic SDK（claude-sonnet-4-6），edge-tts（TTS 占位），ffmpeg（音频拼接），Remotion（视频渲染），vitest（测试）
+**Tech Stack:** Node.js + TypeScript + tsx，edge-tts（Python CLI，TTS 占位），ffmpeg（音频拼接，系统依赖），Remotion（视频渲染），vitest（测试）
 
 ---
 
@@ -17,23 +17,23 @@
 **Files:**
 - Create: `pipeline/package.json`
 - Create: `pipeline/tsconfig.json`
-- Create: `pipeline/.env.example`
 - Create: `pipeline/src/types.ts`
 
-- [ ] **Step 1: 创建 pipeline/ 目录并初始化**
+- [ ] **Step 1: 创建 pipeline/ 目录并安装依赖**
 
 ```bash
 mkdir -p pipeline/src/tts pipeline/src/__tests__
 cd pipeline
 npm init -y
-npm install anthropic @anthropic-ai/sdk edge-tts cac dotenv gray-matter
+npm install gray-matter
 npm install -D typescript tsx vitest @types/node
 ```
+
+> 无需安装 anthropic SDK、dotenv、cac——LLM 步骤由 skill 直接执行，无需 API Key。
 
 - [ ] **Step 2: 写 tsconfig.json**
 
 ```json
-// pipeline/tsconfig.json
 {
   "compilerOptions": {
     "target": "ES2022",
@@ -54,21 +54,14 @@ npm install -D typescript tsx vitest @types/node
 {
   "type": "module",
   "scripts": {
-    "generate": "tsx src/index.ts",
+    "tts": "tsx src/tts.ts",
     "render": "tsx src/render.ts",
     "test": "vitest run"
   }
 }
 ```
 
-- [ ] **Step 4: 创建 .env.example**
-
-```
-# pipeline/.env.example
-ANTHROPIC_API_KEY=your_key_here
-```
-
-- [ ] **Step 5: 写共享类型 `pipeline/src/types.ts`**
+- [ ] **Step 4: 写共享类型 `pipeline/src/types.ts`**
 
 ```ts
 // pipeline/src/types.ts
@@ -143,11 +136,11 @@ export interface ScriptSegment {
 }
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add pipeline/
-git commit -m "feat: initialize pipeline project with types"
+git commit -m "feat: initialize pipeline project with shared types"
 ```
 
 ---
@@ -230,7 +223,6 @@ export const RemotionRoot: React.FC = () => {
 touch remotion-player/public/.gitkeep
 echo "remotion-player/public/audio.mp3" >> .gitignore
 echo "output/" >> .gitignore
-echo ".env" >> .gitignore
 ```
 
 - [ ] **Step 7: Commit**
@@ -244,7 +236,7 @@ git commit -m "feat: initialize remotion-player project"
 
 ### Task 3: 脚本解析器
 
-解析 `script.md` 的核心工具，被 Step 2 和 Step 3 共用。
+解析 `script.md` 的核心工具，被 `tts.ts` 和 skill 的 ID 验证步骤共用。
 
 **Files:**
 - Create: `pipeline/src/parser.ts`
@@ -289,7 +281,7 @@ describe('parseScript', () => {
   })
 })
 
-describe('splitIntoSegments', () => {
+describe('parseScript ID 校验', () => {
   it('段落 id 与 slide_markers 不一致时抛出错误', () => {
     const badScript = `---
 title: test
@@ -332,7 +324,7 @@ export function parseScript(content: string): ParsedScript {
   // 按 <!-- SLIDE: id --> 分割，保留空文本段落
   const slideRegex = /<!--\s*SLIDE:\s*(\S+)\s*-->/g
   const parts = body.split(slideRegex)
-  // split 结果：[前置内容, id1, text1, id2, text2, ...]，第一项为标记前的内容（丢弃）
+  // split 结果：[前置内容, id1, text1, id2, text2, ...]，第一项为标记前内容（丢弃）
   const segments: ScriptSegment[] = []
   for (let i = 1; i < parts.length; i += 2) {
     segments.push({ id: parts[i].trim(), text: (parts[i + 1] ?? '').trim() })
@@ -341,12 +333,13 @@ export function parseScript(content: string): ParsedScript {
   // 校验 ID 一致性
   const parsedIds = segments.map(s => s.id)
   const expectedIds = frontmatter.slide_markers
-  const mismatch = parsedIds.some((id, i) => id !== expectedIds[i])
-    || parsedIds.length !== expectedIds.length
+  const mismatch =
+    parsedIds.length !== expectedIds.length ||
+    parsedIds.some((id, i) => id !== expectedIds[i])
 
   if (mismatch) {
     throw new Error(
-      `SLIDE ID 不匹配：script.md 中的 [${parsedIds}] 与 slides.json 中的 [${expectedIds}] 不一致`
+      `SLIDE ID 不匹配：script.md 中的 [${parsedIds}] 与 frontmatter 中的 [${expectedIds}] 不一致`
     )
   }
 
@@ -359,7 +352,7 @@ export function parseScript(content: string): ParsedScript {
 ```bash
 cd pipeline && npx vitest run src/__tests__/parser.test.ts
 ```
-预期：PASS，2 个测试通过
+预期：PASS，3 个测试通过
 
 - [ ] **Step 5: Commit**
 
@@ -370,7 +363,7 @@ git commit -m "feat: add script parser with SLIDE marker splitting and ID valida
 
 ---
 
-## Chunk 2: Pipeline AI 步骤（Step 1 + Step 2 + TTS 接口）
+## Chunk 2: TTS 合成脚本 + Render 脚本
 
 ### Task 4: TTS 接口 + edge-tts 实现
 
@@ -394,6 +387,8 @@ export interface TTSProvider {
 
 - [ ] **Step 2: 写 edge-tts 实现**
 
+edge-tts 是 Python CLI 工具（`pip install edge-tts`），通过 execSync 调用。
+
 ```ts
 // pipeline/src/tts/edge-tts.ts
 import { execSync } from 'child_process'
@@ -408,7 +403,6 @@ export class EdgeTTSProvider implements TTSProvider {
   }
 
   async synthesize(text: string, outputPath: string): Promise<number> {
-    // edge-tts CLI：edge-tts --voice zh-CN-YunxiNeural --text "..." --write-media output.mp3
     const escaped = text.replace(/"/g, '\\"')
     execSync(
       `edge-tts --voice ${this.voice} --text "${escaped}" --write-media "${outputPath}"`,
@@ -430,7 +424,7 @@ export class EdgeTTSProvider implements TTSProvider {
 }
 ```
 
-- [ ] **Step 3: 写 TTS 集成测试（跳过 CI，仅本地运行）**
+- [ ] **Step 3: 写 TTS 集成测试（本地运行，CI 跳过）**
 
 ```ts
 // pipeline/src/__tests__/tts.test.ts
@@ -459,267 +453,31 @@ git commit -m "feat: add TTSProvider interface and edge-tts implementation"
 
 ---
 
-### Task 5: Step 1 — 文章 → 口播脚本
+### Task 5: synthesize.ts — 分段合成 + 时间戳写回
 
 **Files:**
-- Create: `pipeline/src/step1-script.ts`
-- Create: `pipeline/src/__tests__/step1.test.ts`
-
-- [ ] **Step 1: 写失败测试（mock Claude API）**
-
-```ts
-// pipeline/src/__tests__/step1.test.ts
-import { describe, it, expect, vi } from 'vitest'
-import { generateScript } from '../step1-script.js'
-
-vi.mock('@anthropic-ai/sdk', () => ({
-  default: class {
-    messages = {
-      create: vi.fn().mockResolvedValue({
-        content: [{ type: 'text', text: `---
-title: 测试文章
-slide_markers:
-  - intro
-  - main
----
-
-<!-- SLIDE: intro -->
-这是开场白。
-
-<!-- SLIDE: main -->
-这是正文内容。
-` }]
-      })
-    }
-  }
-}))
-
-describe('generateScript', () => {
-  it('返回包含 SLIDE 标记的 Markdown 脚本', async () => {
-    const result = await generateScript('# 测试文章\n正文内容', 'fake-key')
-    expect(result).toContain('<!-- SLIDE:')
-    expect(result).toContain('slide_markers:')
-  })
-})
-```
-
-- [ ] **Step 2: 运行测试确认失败**
-
-```bash
-cd pipeline && npx vitest run src/__tests__/step1.test.ts
-```
-
-- [ ] **Step 3: 实现 step1-script.ts**
-
-```ts
-// pipeline/src/step1-script.ts
-import Anthropic from '@anthropic-ai/sdk'
-
-const SYSTEM_PROMPT = `你是一位专业的科技内容创作者，擅长将技术文章改写为口播视频脚本。
-
-改写规则：
-- 将文章改写为口语化旁白，不直接朗读原文
-- 每句不超过30字，长句拆短
-- 加过渡词：「接下来」「那么」「说到这里」「简单说就是」
-- 用「举个例子」引出具体案例
-- 每出现专业术语后跟口语解释
-- 适当用「……」表示停顿
-
-输出格式（严格遵守）：
-1. 开头是 YAML frontmatter，包含 title 和 slide_markers 列表
-2. 每个段落前有 <!-- SLIDE: id --> 注释，id 与 slide_markers 中一一对应
-3. 全视频约 1400 字（约 7 分钟）
-4. 结构：开场(1个SLIDE) → 背景铺垫(1-2个SLIDE) → 核心内容(3-5个SLIDE) → 总结(1个SLIDE)
-
-参考示例开场：
-"本期节目我们来聊一个问题——AI Agent 到底是什么。
-你可能已经听过这个词很多次了，但它跟我们平时用的 ChatGPT 又有什么不一样？"`
-
-export async function generateScript(
-  articleContent: string,
-  apiKey: string
-): Promise<string> {
-  const client = new Anthropic({ apiKey })
-
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
-    system: SYSTEM_PROMPT,
-    messages: [
-      {
-        role: 'user',
-        content: `请将以下文章改写为口播视频脚本：\n\n${articleContent}`
-      }
-    ]
-  })
-
-  const block = response.content[0]
-  if (block.type !== 'text') throw new Error('LLM 返回非文本内容')
-  return block.text
-}
-```
-
-- [ ] **Step 4: 运行测试确认通过**
-
-```bash
-cd pipeline && npx vitest run src/__tests__/step1.test.ts
-```
-预期：PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add pipeline/src/step1-script.ts pipeline/src/__tests__/step1.test.ts
-git commit -m "feat: add step1 article-to-script via Claude API"
-```
-
----
-
-### Task 6: Step 2 — 脚本 → 幻灯片 JSON
-
-**Files:**
-- Create: `pipeline/src/step2-slides.ts`
-- Create: `pipeline/src/__tests__/step2.test.ts`
+- Create: `pipeline/src/synthesize.ts`
+- Create: `pipeline/src/__tests__/synthesize.test.ts`
 
 - [ ] **Step 1: 写失败测试**
 
 ```ts
-// pipeline/src/__tests__/step2.test.ts
+// pipeline/src/__tests__/synthesize.test.ts
 import { describe, it, expect, vi } from 'vitest'
-import { generateSlides } from '../step2-slides.js'
+import { synthesizeAndTimestamp } from '../synthesize.js'
 import type { SlidesJson } from '../types.js'
 
-vi.mock('@anthropic-ai/sdk', () => ({
-  default: class {
-    messages = {
-      create: vi.fn().mockResolvedValue({
-        content: [{ type: 'text', text: JSON.stringify({
-          title: '测试文章',
-          slides: [
-            { id: 'intro', type: 'title', title: '测试文章', subtitle: '副标题' },
-            { id: 'main', type: 'content', title: '主要内容', points: ['要点一', '要点二'] }
-          ]
-        } as SlidesJson) }]
-      })
-    }
-  }
-}))
-
-describe('generateSlides', () => {
-  it('返回有效的 SlidesJson 对象', async () => {
-    const script = `---
-title: 测试
-slide_markers: [intro, main]
----
-<!-- SLIDE: intro -->文字
-<!-- SLIDE: main -->文字`
-
-    const result = await generateSlides(script, 'fake-key')
-    expect(result.title).toBe('测试文章')
-    expect(result.slides).toHaveLength(2)
-    expect(result.slides[0].type).toBe('title')
-  })
-})
-```
-
-- [ ] **Step 2: 运行测试确认失败**
-
-```bash
-cd pipeline && npx vitest run src/__tests__/step2.test.ts
-```
-
-- [ ] **Step 3: 实现 step2-slides.ts**
-
-```ts
-// pipeline/src/step2-slides.ts
-import Anthropic from '@anthropic-ai/sdk'
-import type { SlidesJson } from './types.js'
-
-const SYSTEM_PROMPT = `你是幻灯片内容提取专家。根据口播脚本，提取每个章节的关键内容，生成幻灯片 JSON。
-
-幻灯片类型规则：
-- 第一个 SLIDE → type: "title"（大标题封面）
-- 列举多个要点 → type: "content"（带✓图标的列表）
-- 并列介绍4-5个概念 → type: "cards"（彩色卡片横排）
-- 金句/核心理念 → type: "highlight"（大字引用）
-- 正确vs错误对比 → type: "comparison"（左右分栏）
-- 总结章节 → type: "content" 或 "highlight"
-
-输出纯 JSON，不要任何 markdown 代码块包裹。`
-
-export async function generateSlides(
-  scriptContent: string,
-  apiKey: string
-): Promise<SlidesJson> {
-  const client = new Anthropic({ apiKey })
-
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
-    system: SYSTEM_PROMPT,
-    messages: [
-      {
-        role: 'user',
-        content: `根据以下口播脚本，生成幻灯片 JSON：\n\n${scriptContent}`
-      }
-    ]
-  })
-
-  const block = response.content[0]
-  if (block.type !== 'text') throw new Error('LLM 返回非文本内容')
-
-  try {
-    return JSON.parse(block.text) as SlidesJson
-  } catch {
-    throw new Error(`LLM 返回的 JSON 无效：${block.text.slice(0, 200)}`)
-  }
-}
-```
-
-- [ ] **Step 4: 运行测试确认通过**
-
-```bash
-cd pipeline && npx vitest run src/__tests__/step2.test.ts
-```
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add pipeline/src/step2-slides.ts pipeline/src/__tests__/step2.test.ts
-git commit -m "feat: add step2 script-to-slides-json via Claude API"
-```
-
----
-
-### Task 7: Step 3 — TTS 分段合成 + 时间戳写回
-
-**Files:**
-- Create: `pipeline/src/step3-tts.ts`
-- Create: `pipeline/src/__tests__/step3.test.ts`
-
-- [ ] **Step 1: 写失败测试**
-
-```ts
-// pipeline/src/__tests__/step3.test.ts
-import { describe, it, expect, vi } from 'vitest'
-import { synthesizeAndTimestamp } from '../step3-tts.js'
-import type { SlidesJson } from '../types.js'
-
-// Mock TTSProvider
 const mockTTS = {
   synthesize: vi.fn()
     .mockResolvedValueOnce(3.2)  // intro: 3.2s
     .mockResolvedValueOnce(8.7)  // main: 8.7s
 }
 
-// Mock ffmpeg concat (execSync)
-vi.mock('child_process', () => ({
-  execSync: vi.fn()
-}))
+vi.mock('child_process', () => ({ execSync: vi.fn() }))
 
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>()
-  return { ...actual, writeFileSync: vi.fn(), copyFileSync: vi.fn() }
+  return { ...actual, writeFileSync: vi.fn(), mkdirSync: vi.fn() }
 })
 
 describe('synthesizeAndTimestamp', () => {
@@ -751,13 +509,13 @@ describe('synthesizeAndTimestamp', () => {
 - [ ] **Step 2: 运行测试确认失败**
 
 ```bash
-cd pipeline && npx vitest run src/__tests__/step3.test.ts
+cd pipeline && npx vitest run src/__tests__/synthesize.test.ts
 ```
 
-- [ ] **Step 3: 实现 step3-tts.ts**
+- [ ] **Step 3: 实现 synthesize.ts**
 
 ```ts
-// pipeline/src/step3-tts.ts
+// pipeline/src/synthesize.ts
 import { execSync } from 'child_process'
 import { writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
@@ -774,11 +532,9 @@ export async function synthesizeAndTimestamp(
 
   const segmentFiles: string[] = []
   let cursor = 0
-
   const updatedSlides = [...slides.slides]
 
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i]
+  for (const seg of segments) {
     const segPath = join(outputDir, `.tmp_seg_${seg.id}.mp3`)
     segmentFiles.push(segPath)
 
@@ -805,135 +561,76 @@ export async function synthesizeAndTimestamp(
 - [ ] **Step 4: 运行测试确认通过**
 
 ```bash
-cd pipeline && npx vitest run src/__tests__/step3.test.ts
+cd pipeline && npx vitest run src/__tests__/synthesize.test.ts
 ```
+预期：PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add pipeline/src/step3-tts.ts pipeline/src/__tests__/step3.test.ts
-git commit -m "feat: add step3 TTS synthesis with timestamp writing"
+git add pipeline/src/synthesize.ts pipeline/src/__tests__/synthesize.test.ts
+git commit -m "feat: add synthesizeAndTimestamp with ffmpeg concat"
 ```
 
 ---
 
-## Chunk 3: Pipeline Orchestrator + Render 命令
+### Task 6: tts.ts — TTS 入口脚本
 
-### Task 8: CLI 主入口（orchestrator）
+由 skill 通过 `npm run tts` 调用的独立可执行脚本，无需参数。
 
 **Files:**
-- Create: `pipeline/src/index.ts`
+- Create: `pipeline/src/tts.ts`
 
-- [ ] **Step 1: 实现 CLI 主入口**
+- [ ] **Step 1: 实现 tts.ts**
 
 ```ts
-// pipeline/src/index.ts
-import { cac } from 'cac'
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
-import { resolve, join } from 'path'
-import { config } from 'dotenv'
-import { generateScript } from './step1-script.js'
-import { generateSlides } from './step2-slides.js'
-import { synthesizeAndTimestamp } from './step3-tts.js'
+// pipeline/src/tts.ts
+import { readFileSync, writeFileSync } from 'fs'
+import { join } from 'path'
 import { parseScript } from './parser.js'
+import { synthesizeAndTimestamp } from './synthesize.js'
 import { EdgeTTSProvider } from './tts/edge-tts.js'
 import type { SlidesJson } from './types.js'
 
-config()
+// import.meta.url 指向 pipeline/src/tts.ts，../.. 向上两级到项目根目录
+const projectRoot = new URL('../..', import.meta.url).pathname
+const outputDir = join(projectRoot, 'output')
+const scriptPath = join(outputDir, 'script.md')
+const slidesPath = join(outputDir, 'slides.json')
 
-const cli = cac('article-to-podcast')
+console.log('🔊 Step 3: 合成语音并写入时间戳...')
 
-cli
-  .command('', '从文章生成播客和视频')
-  .option('--input <file>', '输入 Markdown 文章路径')
-  .option('--from <step>', '从第几步开始（1-4）', { default: '1' })
-  .option('--force', '强制重跑所有步骤')
-  .action(async (options: { input: string; from: string; force: boolean }) => {
-    const apiKey = process.env.ANTHROPIC_API_KEY
-    if (!apiKey) throw new Error('缺少 ANTHROPIC_API_KEY 环境变量')
+const script = readFileSync(scriptPath, 'utf8')
+const slides: SlidesJson = JSON.parse(readFileSync(slidesPath, 'utf8'))
+const { segments } = parseScript(script)
 
-    const inputPath = resolve(options.input)
-    const fromStep = parseInt(options.from)
-    // outputDir 以项目根目录（pipeline 的上级）为基准，避免依赖 cwd
-    const projectRoot = new URL('../../..', import.meta.url).pathname
-    const outputDir = join(projectRoot, 'output')
-    mkdirSync(outputDir, { recursive: true })
+const tts = new EdgeTTSProvider()
+const updatedSlides = await synthesizeAndTimestamp(segments, slides, tts, outputDir)
+writeFileSync(slidesPath, JSON.stringify(updatedSlides, null, 2))
 
-    const scriptPath = join(outputDir, 'script.md')
-    const slidesPath = join(outputDir, 'slides.json')
-    const audioPath  = join(outputDir, 'audio.mp3')
-
-    const shouldRun = (step: number) => options.force || step >= fromStep
-
-    // Step 1: 文章 → 脚本
-    if (shouldRun(1) || !existsSync(scriptPath)) {
-      console.log('📝 Step 1: 生成口播脚本...')
-      const article = readFileSync(inputPath, 'utf8')
-      const script = await generateScript(article, apiKey)
-      writeFileSync(scriptPath, script)
-      console.log(`✅ 脚本已保存：${scriptPath}`)
-    } else {
-      console.log('⏭️  Step 1: 脚本已存在，跳过')
-    }
-
-    // Step 2: 脚本 → 幻灯片 JSON（无时间戳）
-    if (shouldRun(2) || !existsSync(slidesPath)) {
-      console.log('🎨 Step 2: 生成幻灯片结构...')
-      const script = readFileSync(scriptPath, 'utf8')
-      const slides = await generateSlides(script, apiKey)
-      writeFileSync(slidesPath, JSON.stringify(slides, null, 2))
-      console.log(`✅ 幻灯片 JSON 已保存：${slidesPath}`)
-    } else {
-      console.log('⏭️  Step 2: slides.json 已存在，跳过')
-    }
-
-    // Step 3: TTS + 时间戳写回
-    if (shouldRun(3) || !existsSync(audioPath)) {
-      console.log('🔊 Step 3: 合成语音并写入时间戳...')
-      const script = readFileSync(scriptPath, 'utf8')
-      const slides: SlidesJson = JSON.parse(readFileSync(slidesPath, 'utf8'))
-      const { segments } = parseScript(script)
-      const tts = new EdgeTTSProvider()
-      const updatedSlides = await synthesizeAndTimestamp(segments, slides, tts, outputDir)
-      writeFileSync(slidesPath, JSON.stringify(updatedSlides, null, 2))
-      console.log(`✅ 播客已保存：${audioPath}`)
-      console.log(`✅ 时间戳已写入：${slidesPath}`)
-    } else {
-      console.log('⏭️  Step 3: audio.mp3 已存在，跳过')
-    }
-
-    // Step 4: Remotion 渲染
-    if (shouldRun(4)) {
-      console.log('🎬 Step 4: 渲染视频...')
-      const { runRender } = await import('./render.js')
-      await runRender(outputDir)
-      console.log(`✅ 视频已生成：${join(outputDir, 'video.mp4')}`)
-    }
-
-    console.log('\n🎉 完成！')
-  })
-
-cli.help()
-cli.parse()
+console.log(`✅ 播客已保存：${join(outputDir, 'audio.mp3')}`)
+console.log(`✅ 时间戳已写入：${slidesPath}`)
 ```
 
-- [ ] **Step 2: 验证 CLI 帮助信息**
+- [ ] **Step 2: 验证脚本能被 tsx 解析（无需实际执行 TTS）**
 
 ```bash
-cd pipeline && tsx src/index.ts --help
+cd pipeline && tsx --version
+# 只检查语法，不实际运行
 ```
-预期输出包含 `--input`、`--from`、`--force` 选项说明
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add pipeline/src/index.ts
-git commit -m "feat: add pipeline CLI orchestrator with --from and --force flags"
+git add pipeline/src/tts.ts
+git commit -m "feat: add tts.ts entry script for skill invocation"
 ```
 
 ---
 
-### Task 9: Render 命令
+### Task 7: render.ts — Remotion 渲染脚本
+
+由 skill 通过 `npm run render` 调用，读取 `output/` 下的产物触发 Remotion 渲染。
 
 **Files:**
 - Create: `pipeline/src/render.ts`
@@ -943,59 +640,55 @@ git commit -m "feat: add pipeline CLI orchestrator with --from and --force flags
 ```ts
 // pipeline/src/render.ts
 import { execSync } from 'child_process'
-import { copyFileSync, existsSync } from 'fs'
-import { resolve, join } from 'path'
+import { copyFileSync, existsSync, readFileSync } from 'fs'
+import { join } from 'path'
 
-export async function runRender(outputDir: string): Promise<void> {
-  const audioSrc = join(outputDir, 'audio.mp3')
-  const slidesSrc = join(outputDir, 'slides.json')
-  const remotionDir = new URL('../../remotion-player', import.meta.url).pathname
-  const audioDst = join(remotionDir, 'public', 'audio.mp3')
-  const videoOut = join(outputDir, 'video.mp4')
+// import.meta.url 指向 pipeline/src/render.ts
+const projectRoot = new URL('../..', import.meta.url).pathname
+const outputDir = join(projectRoot, 'output')
+const remotionDir = join(projectRoot, 'remotion-player')
 
-  if (!existsSync(audioSrc)) throw new Error(`audio.mp3 不存在，请先运行 Step 3`)
-  if (!existsSync(slidesSrc)) throw new Error(`slides.json 不存在，请先运行 Step 2`)
+const audioSrc = join(outputDir, 'audio.mp3')
+const slidesSrc = join(outputDir, 'slides.json')
+const audioDst = join(remotionDir, 'public', 'audio.mp3')
+const videoOut = join(outputDir, 'video.mp4')
 
-  // 验证 slides.json 包含时间戳
-  const { readFileSync: _read } = await import('fs')
-  const slides = JSON.parse(_read(slidesSrc, 'utf8'))
-  const hasTimestamps = slides.slides.every((s: any) => s.startSec !== undefined)
-  if (!hasTimestamps) throw new Error(`slides.json 缺少时间戳，请先运行 Step 3（--from=3）`)
+if (!existsSync(audioSrc)) throw new Error(`audio.mp3 不存在，请先运行 Step 3`)
+if (!existsSync(slidesSrc)) throw new Error(`slides.json 不存在，请先运行 Step 2`)
 
-  // 复制音频到 remotion public/
-  copyFileSync(audioSrc, audioDst)
-  console.log(`  ✓ 音频已复制到 remotion-player/public/`)
+// 验证 slides.json 包含时间戳
+const slides = JSON.parse(readFileSync(slidesSrc, 'utf8'))
+const hasTimestamps = slides.slides.every((s: any) => s.startSec !== undefined)
+if (!hasTimestamps) throw new Error(`slides.json 缺少时间戳，请先运行 Step 3`)
 
-  // 读取 slides.json 内容并以 JSON 字符串形式传入
-  const { readFileSync: readJson } = await import('fs')
-  const propsJson = readJson(slidesSrc, 'utf8')
+// 复制音频到 remotion public/
+copyFileSync(audioSrc, audioDst)
+console.log('  ✓ 音频已复制到 remotion-player/public/')
 
-  // 调用 Remotion CLI 渲染（--props 需要 JSON 字符串，不是文件路径）
-  execSync(
-    `npx remotion render ArticleVideo "${videoOut}" --props=${JSON.stringify(propsJson)}`,
-    { cwd: remotionDir, stdio: 'inherit' }
-  )
-}
+// --props 传入 JSON 字符串（不是文件路径）
+const propsJson = readFileSync(slidesSrc, 'utf8')
 
-// 直接运行支持
-if (process.argv[1]?.endsWith('render.ts')) {
-  const outputDir = resolve('../output')
-  runRender(outputDir).catch(console.error)
-}
+console.log('🎬 Step 4: 渲染视频...')
+execSync(
+  `npx remotion render ArticleVideo "${videoOut}" --props=${JSON.stringify(propsJson)}`,
+  { cwd: remotionDir, stdio: 'inherit' }
+)
+
+console.log(`✅ 视频已生成：${videoOut}`)
 ```
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add pipeline/src/render.ts
-git commit -m "feat: add render command that copies audio and triggers Remotion"
+git commit -m "feat: add render.ts entry script for Remotion rendering"
 ```
 
 ---
 
-## Chunk 4: Remotion 幻灯片组件
+## Chunk 3: Remotion 幻灯片组件
 
-### Task 10: 共享动画工具 + 字幕条
+### Task 8: 共享动画工具 + 字幕条
 
 **Files:**
 - Create: `remotion-player/src/animations.ts`
@@ -1077,7 +770,7 @@ git commit -m "feat: add animation utilities and Caption component"
 
 ---
 
-### Task 11: TitleSlide + ContentSlide 组件
+### Task 9: TitleSlide + ContentSlide 组件
 
 **Files:**
 - Create: `remotion-player/src/compositions/ArticleVideo/components/TitleSlide.tsx`
@@ -1125,13 +818,15 @@ export const TitleSlide: React.FC<{ slide: TitleSlideType }> = ({ slide }) => {
 
 - [ ] **Step 2: 实现 ContentSlide**
 
+每个列表项独立为组件，确保 Hooks 不在循环中调用。
+
 ```tsx
 // remotion-player/src/compositions/ArticleVideo/components/ContentSlide.tsx
 import React from 'react'
 import { useFadeIn, useSlideInLeft } from '../../../animations.js'
 import type { ContentSlide as ContentSlideType } from '../../../types.js'
 
-// 独立组件，确保 Hooks 不在循环中调用
+// 独立组件，每个实例独立调用 Hook
 const ContentPoint: React.FC<{ point: string; index: number }> = ({ point, index }) => {
   const { opacity, translateX } = useSlideInLeft(index * 15)
   return (
@@ -1182,7 +877,7 @@ git commit -m "feat: add TitleSlide and ContentSlide Remotion components"
 
 ---
 
-### Task 12: CardsSlide + HighlightSlide 组件
+### Task 10: CardsSlide + HighlightSlide 组件
 
 **Files:**
 - Create: `remotion-player/src/compositions/ArticleVideo/components/CardsSlide.tsx`
@@ -1204,7 +899,7 @@ const CARD_COLORS = [
   { bg: 'rgba(230,255,240,0.8)', border: 'rgba(100,200,150,0.4)' },
 ]
 
-// 独立组件，避免 Hooks 在 map 循环中调用
+// 独立组件，每个实例独立调用 Hook
 const CardItem: React.FC<{ card: Card; index: number }> = ({ card, index }) => {
   const opacity = useFadeIn(index * 12, 20)
   const color = CARD_COLORS[index % CARD_COLORS.length]
@@ -1304,9 +999,9 @@ git commit -m "feat: add CardsSlide and HighlightSlide Remotion components"
 
 ---
 
-## Chunk 5: Remotion 合成 + 端到端集成
+## Chunk 4: Remotion 合成 + Skill 文件 + 端到端集成
 
-### Task 13: SlideRenderer + 主 Composition
+### Task 11: SlideRenderer + 主 Composition + Root
 
 **Files:**
 - Create: `remotion-player/src/compositions/ArticleVideo/SlideRenderer.tsx`
@@ -1326,11 +1021,11 @@ import { HighlightSlide } from './components/HighlightSlide.js'
 
 export const SlideRenderer: React.FC<{ slide: Slide }> = ({ slide }) => {
   switch (slide.type) {
-    case 'title':      return <TitleSlide slide={slide} />
-    case 'content':    return <ContentSlide slide={slide} />
-    case 'cards':      return <CardsSlide slide={slide} />
-    case 'highlight':  return <HighlightSlide slide={slide} />
-    default:           return <div>未知 slide 类型</div>
+    case 'title':     return <TitleSlide slide={slide} />
+    case 'content':   return <ContentSlide slide={slide} />
+    case 'cards':     return <CardsSlide slide={slide} />
+    case 'highlight': return <HighlightSlide slide={slide} />
+    default:          return <div>未知 slide 类型</div>
   }
 }
 ```
@@ -1343,11 +1038,9 @@ import React from 'react'
 import { AbsoluteFill, Audio, staticFile, useCurrentFrame, useVideoConfig } from 'remotion'
 import type { SlidesJson } from '../../types.js'
 import { SlideRenderer } from './SlideRenderer.js'
-import { Caption } from '../../components/Caption.js'
 
 interface Props {
   slidesData: SlidesJson
-  captionText?: string
 }
 
 export const ArticleVideo: React.FC<Props> = ({ slidesData }) => {
@@ -1363,6 +1056,7 @@ export const ArticleVideo: React.FC<Props> = ({ slidesData }) => {
 
   return (
     <AbsoluteFill style={{ background: '#ffffff' }}>
+      {/* staticFile() 从 remotion-player/public/ 目录读取 */}
       <Audio src={staticFile('audio.mp3')} />
       <SlideRenderer slide={currentSlide} />
     </AbsoluteFill>
@@ -1394,13 +1088,12 @@ export const RemotionRoot: React.FC = () => {
       <Composition
         id="ArticleVideo"
         component={ArticleVideo}
-        durationInFrames={450}   // 15s 开发预览，渲染时由 render.ts 传入实际时长
+        durationInFrames={450}   // 开发预览默认 15s，渲染时由 calculateMetadata 计算实际时长
         fps={30}
         width={1920}
         height={1080}
         defaultProps={{ slidesData: DEV_SLIDES }}
         calculateMetadata={async ({ props }) => {
-          // 根据 slides 最后一个 endSec 计算实际视频时长
           const lastSlide = props.slidesData.slides.at(-1)
           const totalSec = lastSlide?.endSec ?? 15
           return { durationInFrames: Math.ceil(totalSec * 30) }
@@ -1427,74 +1120,290 @@ git commit -m "feat: add SlideRenderer, ArticleVideo composition, and Root with 
 
 ---
 
-### Task 14: 端到端集成测试
+### Task 12: article-to-podcast Skill 文件
+
+Skill 文件由 Claude Code 执行，替代原来的 LLM 调用层（step1-script.ts、step2-slides.ts、index.ts）。
 
 **Files:**
-- Create: `pipeline/src/__tests__/e2e.test.ts`（集成验证脚本）
+- Create: `skills/article-to-podcast/SKILL.md`
 
-- [ ] **Step 1: 安装 edge-tts CLI**
+- [ ] **Step 1: 创建 skill 目录**
 
 ```bash
+mkdir -p skills/article-to-podcast
+```
+
+- [ ] **Step 2: 写 SKILL.md**
+
+```markdown
+---
+name: article-to-podcast
+description: 将 Markdown 文章转换为口播播客（MP3）和幻灯片讲解视频（MP4）
+args: "<input-file> [--from=N]"
+---
+
+# Article to Podcast
+
+将 Markdown 文章自动转换为口播播客和幻灯片视频，每步产出可编辑的中间产物。
+
+## 参数
+
+- `<input-file>` — 输入 Markdown 文件路径（相对于项目根目录）
+- `--from=N` — 从第 N 步开始（默认 1）
+
+| N | 含义 |
+|---|------|
+| 1 | 文章 → 口播脚本（output/script.md）|
+| 2 | 脚本 → 幻灯片 JSON（output/slides.json）|
+| 3 | TTS 合成（output/audio.mp3）|
+| 4 | Remotion 渲染（output/video.mp4）|
+
+## 中间产物
+
+| 产物 | 路径 |
+|------|------|
+| 口播脚本 | `output/script.md` |
+| 幻灯片 JSON | `output/slides.json` |
+| 播客音频 | `output/audio.mp3` |
+| 讲解视频 | `output/video.mp4` |
+
+---
+
+## 执行流程
+
+**开始前：**
+1. 解析 `<input-file>` 路径和 `--from` 值（默认 1）
+2. 运行 `mkdir -p output` 确保输出目录存在
+
+---
+
+### Step 1：文章 → 口播脚本
+
+**触发条件：** `--from <= 1`（若 `output/script.md` 已存在且 `--from > 1` 则跳过）
+
+读取 `<input-file>`，按以下规则改写为口播视频脚本，直接写入 `output/script.md`。
+
+**改写规则：**
+- 改写为口语化旁白，不直接朗读原文，像在做视频讲解
+- 每句不超过 30 字，长句拆短，适合 TTS 播报
+- 使用过渡词：「接下来」「那么」「说到这里」「简单说就是」
+- 用「举个例子」引出具体案例
+- 每出现专业术语后紧接口语解释
+- 全文约 1400 字（约 7 分钟视频）
+- 结构：开场（1个）→ 背景铺垫（1-2个）→ 核心内容（3-5个）→ 总结（1个）
+
+**输出格式（严格遵守）：**
+
+```
+---
+title: 文章标题
+slide_markers:
+  - intro
+  - background
+  - core-concept
+  - applications
+  - summary
+---
+
+<!-- SLIDE: intro -->
+今天我们来聊一个问题——XXX 到底是什么。
+你可能已经听过这个词很多次了……
+
+<!-- SLIDE: background -->
+……
+```
+
+- `slide_markers` 列表必须与正文中的 `<!-- SLIDE: id -->` 标记一一对应，顺序一致
+- ID 使用英文 kebab-case，如 `core-concept`、`tech-stack`
+
+---
+
+### Step 2：脚本 → 幻灯片 JSON
+
+**触发条件：** `--from <= 2`（若 `output/slides.json` 已存在且 `--from > 2` 则跳过）
+
+读取 `output/script.md`，根据每个 `<!-- SLIDE: id -->` 段落内容，提取关键信息生成 JSON，写入 `output/slides.json`。
+
+**幻灯片类型选择规则：**
+
+| 场景 | 类型 |
+|------|------|
+| 第一个 SLIDE（标题封面） | `"title"` |
+| 列举要点（3-6条） | `"content"` |
+| 并列介绍 4-5 个概念 | `"cards"` |
+| 金句/核心理念 | `"highlight"` |
+| 两种方案正反对比 | `"comparison"` |
+
+**JSON Schema：**
+
+```json
+{
+  "title": "文章主标题",
+  "slides": [
+    {
+      "id": "intro",
+      "type": "title",
+      "title": "主标题",
+      "subtitle": "可选副标题"
+    },
+    {
+      "id": "core-concept",
+      "type": "content",
+      "title": "章节标题",
+      "points": ["要点一", "要点二", "要点三"]
+    },
+    {
+      "id": "tech-stack",
+      "type": "cards",
+      "title": "章节标题",
+      "cards": [
+        { "icon": "🧠", "label": "名称", "desc": "简短描述" }
+      ]
+    },
+    {
+      "id": "summary",
+      "type": "highlight",
+      "title": "总结",
+      "quote": "核心金句",
+      "body": "可选补充说明"
+    }
+  ]
+}
+```
+
+**注意事项：**
+- 每个 slide 的 `id` 必须与 `script.md` 中的标记完全一致
+- 输出纯 JSON，不加 markdown 代码块包裹
+- **不填写** `startSec`/`endSec` 字段（由 Step 3 写入）
+
+---
+
+### Step 3：TTS 合成
+
+**触发条件：** `--from <= 3`
+
+运行以下命令（在项目根目录下）：
+
+```bash
+cd pipeline && npm run tts
+```
+
+等待命令完成。确认 `output/audio.mp3` 存在后继续。
+
+---
+
+### Step 4：视频渲染
+
+**触发条件：** `--from <= 4`
+
+运行以下命令（在项目根目录下）：
+
+```bash
+cd pipeline && npm run render
+```
+
+等待渲染完成。确认 `output/video.mp4` 存在后继续。
+
+---
+
+## 完成后报告
+
+列出产出文件路径和大小：
+- `output/script.md`
+- `output/slides.json`
+- `output/audio.mp3`
+- `output/video.mp4`
+```
+
+- [ ] **Step 3: 将 skill 链接到全局**
+
+```bash
+cd /Users/jiashengwang/jacky-github/jacky-skills
+# 将 article-to-podcast 从本项目链接过来
+ln -s /Users/jiashengwang/jacky-github/article-to-podcast/skills/article-to-podcast article-to-podcast
+j-skills link article-to-podcast
+j-skills install article-to-podcast -g
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add skills/
+git commit -m "feat: add article-to-podcast Claude Code skill"
+```
+
+---
+
+### Task 13: 端到端集成测试
+
+- [ ] **Step 1: 安装系统依赖**
+
+```bash
+# edge-tts（Python CLI）
 pip install edge-tts
 # 验证安装
 edge-tts --list-voices | grep zh-CN
+
+# ffmpeg（如未安装）
+brew install ffmpeg
 ```
 
-- [ ] **Step 2: 创建 .env 文件**
+- [ ] **Step 2: 运行全流程（sample.md → 播客 + 视频）**
 
-```bash
-cd pipeline
-cp .env.example .env
-# 编辑 .env，填入真实的 ANTHROPIC_API_KEY
+在 Claude Code 中调用 skill：
+
+```
+/article-to-podcast sample.md
 ```
 
-- [ ] **Step 3: 运行全流程（sample.md → 播客 + 视频）**
-
-```bash
-cd pipeline
-npm run generate -- --input=../sample.md
+预期日志：
 ```
-
-预期输出：
-```
-📝 Step 1: 生成口播脚本...
-✅ 脚本已保存：.../output/script.md
-🎨 Step 2: 生成幻灯片结构...
-✅ 幻灯片 JSON 已保存：.../output/slides.json
+📝 Step 1: 生成口播脚本...（Claude 直接写文件）
+🎨 Step 2: 生成幻灯片 JSON...（Claude 直接写文件）
 🔊 Step 3: 合成语音并写入时间戳...
 ✅ 播客已保存：.../output/audio.mp3
 🎬 Step 4: 渲染视频...
 ✅ 视频已生成：.../output/video.mp4
-🎉 完成！
 ```
 
-- [ ] **Step 4: 验证产物**
+- [ ] **Step 3: 验证产物**
 
 ```bash
 # 检查文件存在
-ls -lh ../output/
+ls -lh output/
+
 # 验证 slides.json 包含时间戳
-cat ../output/slides.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['slides'][0])"
+python3 -c "import json; d=json.load(open('output/slides.json')); print(d['slides'][0])"
+
 # 播放播客
-open ../output/audio.mp3
+open output/audio.mp3
+
 # 播放视频
-open ../output/video.mp4
+open output/video.mp4
 ```
 
-- [ ] **Step 5: 测试 --from 参数**
+- [ ] **Step 4: 测试 --from 参数**
 
 ```bash
-# 编辑 output/script.md，手动修改一段文字
-# 然后从 Step 2 重跑
-npm run generate -- --input=../sample.md --from=2
-# 确认 script.md 未被重新生成（修改保留），slides.json 和 audio.mp3 重新生成
+# 手动编辑 output/script.md，修改某段文字
+# 然后从 Step 2 重跑（跳过 Step 1）
+# 在 Claude Code 中运行：
+/article-to-podcast sample.md --from=2
+# 确认 script.md 保留了手动编辑，slides.json 和 audio.mp3 重新生成
+```
+
+- [ ] **Step 5: 运行单元测试**
+
+```bash
+cd pipeline && npm test
+# 预期：parser + synthesize 测试全部通过
 ```
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add .
-git commit -m "feat: complete end-to-end pipeline integration"
+git commit -m "feat: complete end-to-end article-to-podcast pipeline"
 ```
 
 ---
@@ -1502,8 +1411,8 @@ git commit -m "feat: complete end-to-end pipeline integration"
 ## 完成后验证清单
 
 - [ ] `cd pipeline && npm test` 所有单元测试通过
-- [ ] `npm run generate -- --input=../sample.md` 全流程跑通
+- [ ] `/article-to-podcast sample.md` 全流程跑通
 - [ ] `output/audio.mp3` 可播放，内容为口语化中文旁白
 - [ ] `output/video.mp4` 可播放，幻灯片与语音同步
-- [ ] `--from=2` 重跑时 script.md 保持不变
-- [ ] `npx remotion studio` 在浏览器中显示开发预览
+- [ ] `/article-to-podcast sample.md --from=2` 重跑时 `output/script.md` 保持不变
+- [ ] `npx remotion studio`（在 remotion-player/ 中）浏览器显示开发预览
