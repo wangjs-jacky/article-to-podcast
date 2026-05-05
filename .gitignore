@@ -1,0 +1,11 @@
+node_modules/
+pipeline/node_modules/
+remotion-player/node_modules/
+output/
+dist/
+pipeline/dist/
+remotion-player/dist/
+*.mp3
+*.mp4
+remotion-player/public/audio.mp3
+.env
