@@ -1,7 +1,7 @@
 import React from 'react'
 import { AbsoluteFill, Audio, staticFile, useCurrentFrame, useVideoConfig } from 'remotion'
-import type { SlidesJson } from '../../types.js'
-import { SlideRenderer } from './SlideRenderer.js'
+import type { SlidesJson } from '../../types'
+import { SlideRenderer } from './SlideRenderer'
 
 interface Props {
   slidesData: SlidesJson

@@ -1,6 +1,6 @@
 import React from 'react'
-import { useFadeIn } from '../../../animations.js'
-import type { Card, CardsSlide as CardsSlideType } from '../../../types.js'
+import { useFadeIn } from '../../../animations'
+import type { Card, CardsSlide as CardsSlideType } from '../../../types'
 
 const CARD_COLORS = [
   { bg: 'rgba(240,248,255,0.8)', border: 'rgba(100,150,200,0.4)' },

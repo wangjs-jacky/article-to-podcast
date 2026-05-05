@@ -1,7 +1,7 @@
 import React from 'react'
 import { Composition } from 'remotion'
-import { ArticleVideo } from './compositions/ArticleVideo/index.js'
-import type { SlidesJson } from './types.js'
+import { ArticleVideo } from './compositions/ArticleVideo/index'
+import type { SlidesJson } from './types'
 
 const DEV_SLIDES: SlidesJson = {
   title: '开发预览',

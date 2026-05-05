@@ -1,6 +1,6 @@
 import React from 'react'
-import { useFadeIn, useSlideInLeft } from '../../../animations.js'
-import type { ContentSlide as ContentSlideType } from '../../../types.js'
+import { useFadeIn, useSlideInLeft } from '../../../animations'
+import type { ContentSlide as ContentSlideType } from '../../../types'
 
 const ContentPoint: React.FC<{ point: string; index: number }> = ({ point, index }) => {
   const { opacity, translateX } = useSlideInLeft(index * 15)

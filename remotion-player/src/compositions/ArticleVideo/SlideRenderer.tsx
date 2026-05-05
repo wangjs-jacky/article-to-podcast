@@ -1,9 +1,9 @@
 import React from 'react'
-import type { Slide } from '../../types.js'
-import { TitleSlide } from './components/TitleSlide.js'
-import { ContentSlide } from './components/ContentSlide.js'
-import { CardsSlide } from './components/CardsSlide.js'
-import { HighlightSlide } from './components/HighlightSlide.js'
+import type { Slide } from '../../types'
+import { TitleSlide } from './components/TitleSlide'
+import { ContentSlide } from './components/ContentSlide'
+import { CardsSlide } from './components/CardsSlide'
+import { HighlightSlide } from './components/HighlightSlide'
 
 export const SlideRenderer: React.FC<{ slide: Slide }> = ({ slide }) => {
   switch (slide.type) {

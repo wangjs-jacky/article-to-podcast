@@ -1,6 +1,6 @@
 import React from 'react'
-import { useFadeIn } from '../../../animations.js'
-import type { TitleSlide as TitleSlideType } from '../../../types.js'
+import { useFadeIn } from '../../../animations'
+import type { TitleSlide as TitleSlideType } from '../../../types'
 
 export const TitleSlide: React.FC<{ slide: TitleSlideType }> = ({ slide }) => {
   const opacity = useFadeIn(0, 30)
