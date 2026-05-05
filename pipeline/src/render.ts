@@ -1,5 +1,5 @@
 import { execSync } from 'child_process'
-import { copyFileSync, existsSync, readFileSync } from 'fs'
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 
 // import.meta.url 指向 pipeline/src/render.ts，../.. 向上两级到项目根目录
@@ -22,11 +22,14 @@ if (!hasTimestamps) throw new Error(`slides.json 缺少时间戳，请先运行 
 copyFileSync(audioSrc, audioDst)
 console.log('  ✓ 音频已复制到 remotion-player/public/')
 
-const propsJson = readFileSync(slidesSrc, 'utf8')
+// Remotion --props 需要包裹成 { slidesData: ... } 的结构，且通过文件路径传入避免 shell 转义问题
+const slidesData = JSON.parse(readFileSync(slidesSrc, 'utf8'))
+const propsFile = join(outputDir, '.remotion-props.json')
+writeFileSync(propsFile, JSON.stringify({ slidesData }))
 
 console.log('🎬 Step 4: 渲染视频...')
 execSync(
-  `npx remotion render ArticleVideo "${videoOut}" --props=${JSON.stringify(propsJson)}`,
+  `npx remotion render src/index.ts ArticleVideo "${videoOut}" --props="${propsFile}"`,
   { cwd: remotionDir, stdio: 'inherit' }
 )
 
