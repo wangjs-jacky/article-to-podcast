@@ -1,0 +1,21 @@
+{
+  "name": "remotion-player",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@remotion/cli": "^4.0.457",
+    "@remotion/core": "^1.0.0-y.46",
+    "@remotion/renderer": "^4.0.457",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "remotion": "^4.0.457"
+  }
+}
