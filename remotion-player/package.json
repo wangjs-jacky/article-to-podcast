@@ -4,6 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts ArticleVideo",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
