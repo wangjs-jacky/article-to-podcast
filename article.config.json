@@ -1,14 +1,6 @@
 {
-  "tts": {
-    "provider": "doubao",
-    "speaker": "Vivi",
-    "speed": 1.0,
-    "overrides": {}
-  },
-  "duration": {
-    "targetSeconds": 60,
-    "charsPerSecond": 4
-  },
+  "tts": { "provider": "doubao", "speaker": "知性灿灿", "speed": 1.0, "overrides": {} },
+  "duration": { "targetSeconds": 120, "charsPerSecond": 3.6 },
   "theme": "sunset-glow",
   "output": "output"
 }

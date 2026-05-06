@@ -18,10 +18,12 @@ export const ArticleVideo: React.FC<Props> = ({ slidesData, themePreset, themeOv
   const { fps } = useVideoConfig()
   const currentSec = frame / fps
 
-  const currentSlide = slidesData.slides.find(
+  const currentIndex = slidesData.slides.findIndex(
     s => s.startSec !== undefined && s.endSec !== undefined
       && currentSec >= s.startSec && currentSec < s.endSec
-  ) ?? slidesData.slides[0]
+  )
+  const slideIndex = currentIndex === -1 ? 0 : currentIndex
+  const currentSlide = slidesData.slides[slideIndex]
 
   const slideStartFrame = Math.round((currentSlide.startSec ?? 0) * fps)
 
@@ -30,7 +32,7 @@ export const ArticleVideo: React.FC<Props> = ({ slidesData, themePreset, themeOv
       <AbsoluteFill style={{ background: theme.colors.bg }}>
         <Audio src={staticFile('audio.mp3')} />
         <Sequence from={slideStartFrame} key={currentSlide.id}>
-          <SlideRenderer slide={currentSlide} />
+          <SlideRenderer slide={currentSlide} index={slideIndex} />
         </Sequence>
       </AbsoluteFill>
     </ThemeContext.Provider>
