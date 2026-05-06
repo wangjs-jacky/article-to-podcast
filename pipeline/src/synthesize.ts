@@ -1,14 +1,15 @@
 import { execSync } from 'child_process'
 import { writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
-import type { TTSProvider } from './tts/interface.js'
+import type { TTSProvider, TTSOptions } from './tts/interface.js'
 import type { ScriptSegment, SlidesJson } from './types.js'
 
 export async function synthesizeAndTimestamp(
   segments: ScriptSegment[],
   slides: SlidesJson,
   tts: TTSProvider,
-  outputDir: string
+  outputDir: string,
+  ttsOverrides?: Record<string, TTSOptions>
 ): Promise<SlidesJson> {
   mkdirSync(outputDir, { recursive: true })
 
@@ -16,11 +17,13 @@ export async function synthesizeAndTimestamp(
   let cursor = 0
   const updatedSlides = [...slides.slides]
 
-  for (const seg of segments) {
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]
     const segPath = join(outputDir, `.tmp_seg_${seg.id}.mp3`)
     segmentFiles.push(segPath)
 
-    const duration = await tts.synthesize(seg.text, segPath)
+    const options = ttsOverrides?.[seg.id]
+    const duration = await tts.synthesize(seg.text, segPath, options)
 
     const slide = updatedSlides.find(s => s.id === seg.id)
     if (slide) {
@@ -28,6 +31,8 @@ export async function synthesizeAndTimestamp(
       slide.endSec = cursor + duration
     }
     cursor += duration
+
+    console.log(`  [${i + 1}/${segments.length}] ${seg.id} (${duration.toFixed(1)}s)`)
   }
 
   const listFile = join(outputDir, '.concat_list.txt')

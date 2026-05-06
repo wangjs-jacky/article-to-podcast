@@ -1,6 +1,7 @@
 import React from 'react'
 import { Composition } from 'remotion'
 import { ArticleVideo } from './compositions/ArticleVideo/index'
+import { PreviewSlide } from './compositions/PreviewSlide'
 import type { SlidesJson } from './types'
 
 const DEV_SLIDES: SlidesJson = {
@@ -27,6 +28,16 @@ export const RemotionRoot: React.FC = () => {
           const totalSec = lastSlide?.endSec ?? 15
           return { durationInFrames: Math.ceil(totalSec * 30) }
         }}
+      />
+      {/* 单张幻灯片预览 Composition，用于 Step 2.5 生成 PNG 预览 */}
+      <Composition
+        id="PreviewSlide"
+        component={PreviewSlide}
+        durationInFrames={60}
+        fps={30}
+        width={1920}
+        height={1080}
+        defaultProps={{ slide: DEV_SLIDES.slides[0] }}
       />
     </>
   )

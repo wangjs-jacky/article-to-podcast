@@ -1,10 +1,14 @@
 import { execSync } from 'child_process'
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
+import { loadConfig, resolveOutputDir } from './config.js'
 
 // import.meta.url 指向 pipeline/src/render.ts，../.. 向上两级到项目根目录
 const projectRoot = new URL('../..', import.meta.url).pathname
-const outputDir = join(projectRoot, 'output')
+
+// 从命令行参数中解析 --output-name=<name>，不传时保持向后兼容（产物在 output/ 下）
+const outputNameArg = process.argv.find((a: string) => a.startsWith('--output-name='))?.split('=')[1]
+const outputDir = resolveOutputDir(loadConfig(), outputNameArg)
 const remotionDir = join(projectRoot, 'remotion-player')
 
 const audioSrc = join(outputDir, 'audio.mp3')

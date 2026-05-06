@@ -1,25 +1,33 @@
 import { execSync } from 'child_process'
 import { existsSync, writeFileSync } from 'fs'
-import type { TTSProvider } from './interface.js'
+import type { TTSProvider, TTSOptions } from './interface.js'
+import { resolveSpeaker } from './speakers.js'
 
 const SSE_URL = 'https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse'
 
 export class DoubaoTTSProvider implements TTSProvider {
   private apiKey: string
   private resourceId: string
-  private speaker: string
+  private defaultSpeaker: string
+  private defaultSpeed: number
 
-  constructor(opts?: { apiKey?: string; resourceId?: string; speaker?: string }) {
+  constructor(opts?: { apiKey?: string; resourceId?: string; speaker?: string; speed?: number }) {
     this.apiKey = opts?.apiKey ?? process.env.DOUBAO_TTS_API_KEY ?? ''
     this.resourceId = opts?.resourceId ?? 'seed-tts-2.0'
-    this.speaker = opts?.speaker ?? process.env.DOUBAO_TTS_SPEAKER ?? 'zh_female_vv_uranus_bigtts'
+    this.defaultSpeaker = resolveSpeaker(opts?.speaker ?? 'Vivi').id
+    this.defaultSpeed = opts?.speed ?? 1.0
 
     if (!this.apiKey) {
       throw new Error('DOUBAO_TTS_API_KEY 环境变量未设置，请在火山引擎控制台获取 API Key')
     }
   }
 
-  async synthesize(text: string, outputPath: string): Promise<number> {
+  async synthesize(text: string, outputPath: string, options?: TTSOptions): Promise<number> {
+    const speaker = options?.speaker
+      ? resolveSpeaker(options.speaker).id
+      : this.defaultSpeaker
+    const speed = options?.speed ?? this.defaultSpeed
+
     const resp = await fetch(SSE_URL, {
       method: 'POST',
       headers: {
@@ -31,8 +39,9 @@ export class DoubaoTTSProvider implements TTSProvider {
         user: { uid: 'article-to-podcast' },
         req_params: {
           text,
-          speaker: this.speaker,
+          speaker,
           audio_params: { format: 'mp3', sample_rate: 24000 },
+          ...(speed !== 1.0 ? { speed_ratio: speed } : {}),
         },
         operation: 'query',
       }),
@@ -65,8 +74,8 @@ export class DoubaoTTSProvider implements TTSProvider {
             } else if (payload.code && payload.code !== 20000000) {
               throw new Error(`豆包 TTS 合成失败 (${payload.code}): ${payload.message}`)
             }
-          } catch {
-            // 跳过非 JSON 行
+          } catch (e) {
+            if (e instanceof Error && e.message.includes('豆包 TTS 合成失败')) throw e
           }
         }
       }
