@@ -9,3 +9,7 @@ remotion-player/dist/
 *.mp4
 remotion-player/public/audio.mp3
 .env
+.DS_Store
+.agent-tasks/
+sample-*.md
+web-articles/
