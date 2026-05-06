@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { parseScript } from './parser.js'
 import { synthesizeAndTimestamp } from './synthesize.js'
@@ -30,7 +30,12 @@ for (const [slideId, override] of Object.entries(config.tts.overrides)) {
   ttsOverrides[slideId] = override
 }
 
-const updatedSlides = await synthesizeAndTimestamp(segments, slides, tts, outputDir, ttsOverrides)
+// 检测已合成的段落用于断点续跑
+const cachedIds = segments
+  .filter(seg => existsSync(join(outputDir, `.tmp_seg_${seg.id}.mp3`)))
+  .map(seg => seg.id)
+
+const updatedSlides = await synthesizeAndTimestamp(segments, slides, tts, outputDir, ttsOverrides, cachedIds)
 writeFileSync(slidesPath, JSON.stringify(updatedSlides, null, 2))
 
 const totalDuration = updatedSlides.slides.reduce(

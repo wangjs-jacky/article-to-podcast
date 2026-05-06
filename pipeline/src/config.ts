@@ -96,7 +96,7 @@ export function loadConfig(): ProjectConfig {
 
 function validateConfig(config: ProjectConfig): void {
   if (config.tts.provider === 'doubao' && !process.env.DOUBAO_TTS_API_KEY) {
-    throw new Error('DOUBAO_TTS_API_KEY 环境变量未设置')
+    console.warn('⚠️  DOUBAO_TTS_API_KEY 未设置，TTS 步骤将不可用')
   }
   // 校验音色名是否有效
   resolveSpeaker(config.tts.speaker)

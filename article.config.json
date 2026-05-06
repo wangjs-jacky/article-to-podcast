@@ -9,6 +9,6 @@
     "targetSeconds": 60,
     "charsPerSecond": 4
   },
-  "theme": "terminal-noir",
+  "theme": "sunset-glow",
   "output": "output"
 }

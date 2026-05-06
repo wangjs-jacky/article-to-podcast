@@ -6,6 +6,7 @@
   "scripts": {
     "tts": "tsx src/tts.ts",
     "render": "tsx src/render.ts",
+    "run": "tsx src/run.ts",
     "test": "vitest run",
     "preview": "tsx src/preview.ts",
     "gen-skill-prompt": "tsx src/slides/gen-skill-prompt.ts",

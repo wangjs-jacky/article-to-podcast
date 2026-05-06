@@ -1,27 +1,15 @@
 import React from 'react'
-import { colors, decoratorBarColors, fontFamily, layout } from '../theme'
+import { useTheme } from '../ThemeContext'
 
 interface SlideLayoutProps {
-  /** 当前 slide 的字幕文字（显示在底部字幕条） */
   caption?: string
-  /** 是否显示顶部4色装饰条（默认显示） */
   showDecoratorBar?: boolean
-  /** 是否显示底部字幕条（默认显示） */
   showCaption?: boolean
-  /** 背景渐变方向，默认从左下到右上 */
   gradientAngle?: number
-  /** 整体主题强调色，用于背景渐变的微弱色调 */
   accentColor?: string
   children: React.ReactNode
 }
 
-/**
- * SlideLayout — 所有 Slide 共享的外层容器
- * 包含：深色渐变背景、顶部4色装饰条、底部字幕条
- *
- * 注意：Remotion 渲染器不支持 backdrop-filter，
- * 因此玻璃效果改用纯半透明背景色实现。
- */
 export const SlideLayout: React.FC<SlideLayoutProps> = ({
   caption,
   showDecoratorBar = true,
@@ -30,7 +18,9 @@ export const SlideLayout: React.FC<SlideLayoutProps> = ({
   accentColor = 'transparent',
   children,
 }) => {
-  // 背景：深黑 + 极弱的放射状色调，营造深邃感
+  const theme = useTheme()
+  const { colors, decoratorBarColors, fontFamily, layout } = theme
+
   const bgStyle: React.CSSProperties = {
     width: '100%',
     height: '100%',
@@ -38,7 +28,7 @@ export const SlideLayout: React.FC<SlideLayoutProps> = ({
     background: `
       radial-gradient(ellipse at 20% 80%, rgba(${hexToRgb(accentColor)}, 0.07) 0%, transparent 60%),
       radial-gradient(ellipse at 80% 20%, rgba(${hexToRgb(accentColor)}, 0.05) 0%, transparent 55%),
-      linear-gradient(${gradientAngle}deg, #0a0a0b 0%, #131316 50%, #0f0f12 100%)
+      linear-gradient(${gradientAngle}deg, ${colors.bg} 0%, ${colors.bgElevated} 50%, #0f0f12 100%)
     `,
     fontFamily,
     overflow: 'hidden',
@@ -46,7 +36,6 @@ export const SlideLayout: React.FC<SlideLayoutProps> = ({
 
   return (
     <div style={bgStyle}>
-      {/* 顶部4色装饰条 */}
       {showDecoratorBar && (
         <div style={{
           position: 'absolute',
@@ -64,7 +53,6 @@ export const SlideLayout: React.FC<SlideLayoutProps> = ({
                 flex: 1,
                 height: '100%',
                 background: color,
-                // 给装饰条加轻微发光效果
                 boxShadow: `0 0 8px ${color}`,
               }}
             />
@@ -72,7 +60,6 @@ export const SlideLayout: React.FC<SlideLayoutProps> = ({
         </div>
       )}
 
-      {/* 主内容区域（预留装饰条和字幕条的空间） */}
       <div style={{
         position: 'absolute',
         top: showDecoratorBar ? layout.decoratorHeight : 0,
@@ -84,7 +71,6 @@ export const SlideLayout: React.FC<SlideLayoutProps> = ({
         {children}
       </div>
 
-      {/* 底部字幕条 */}
       {showCaption && caption && (
         <div style={{
           position: 'absolute',
@@ -100,7 +86,6 @@ export const SlideLayout: React.FC<SlideLayoutProps> = ({
           paddingRight: layout.paddingH,
           zIndex: 10,
         }}>
-          {/* 字幕条左侧的细色块装饰 */}
           <div style={{
             width: 3,
             height: 28,
@@ -121,7 +106,6 @@ export const SlideLayout: React.FC<SlideLayoutProps> = ({
         </div>
       )}
 
-      {/* 背景噪点纹理层（用SVG filter替代，增加质感） */}
       <div style={{
         position: 'absolute',
         inset: 0,
@@ -133,10 +117,6 @@ export const SlideLayout: React.FC<SlideLayoutProps> = ({
   )
 }
 
-/**
- * 将 hex 颜色转换为 R,G,B 格式（供 rgba() 使用）
- * 只处理 #rrggbb 格式，不处理 transparent
- */
 function hexToRgb(hex: string): string {
   if (!hex || hex === 'transparent') return '255,255,255'
   const clean = hex.replace('#', '')

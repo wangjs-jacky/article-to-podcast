@@ -1,16 +1,9 @@
 import React from 'react'
 import { useFadeIn, useSlideInLeft } from '../../../animations'
 import type { ComparisonSlide as ComparisonSlideType } from '../../../types'
-import { colors, layout } from '../theme'
+import { useTheme } from '../ThemeContext'
 import { SlideLayout } from './SlideLayout'
 
-/**
- * ComparisonSlide — 正反对比幻灯片
- * 左侧（错误）：红色 #ff4757
- * 右侧（正确）：霓虹绿 #00ff88
- */
-
-// 错误列颜色
 const WRONG_COLORS = {
   accent: '#ff4757',
   dim: 'rgba(255,71,87,0.1)',
@@ -18,7 +11,6 @@ const WRONG_COLORS = {
   headerBg: 'rgba(255,71,87,0.12)',
 }
 
-// 正确列颜色
 const CORRECT_COLORS = {
   accent: '#00ff88',
   dim: 'rgba(0,255,136,0.1)',
@@ -30,7 +22,8 @@ const ComparisonItem: React.FC<{
   text: string
   index: number
   isCorrect: boolean
-}> = ({ text, index, isCorrect }) => {
+  textColor: string
+}> = ({ text, index, isCorrect, textColor }) => {
   const { opacity, translateX } = useSlideInLeft(index * 10 + (isCorrect ? 0 : 5))
   const accent = isCorrect ? CORRECT_COLORS.accent : WRONG_COLORS.accent
 
@@ -46,7 +39,6 @@ const ComparisonItem: React.FC<{
       background: 'rgba(255,255,255,0.03)',
       border: `1px solid rgba(255,255,255,0.05)`,
     }}>
-      {/* ✓ / ✗ 图标 */}
       <div style={{
         width: 32,
         height: 32,
@@ -66,7 +58,7 @@ const ComparisonItem: React.FC<{
       </div>
       <span style={{
         fontSize: 30,
-        color: colors.text,
+        color: textColor,
         lineHeight: 1.55,
         letterSpacing: '0.01em',
       }}>
@@ -81,7 +73,8 @@ const ComparisonColumn: React.FC<{
   items: string[]
   isCorrect: boolean
   delayFadeIn: number
-}> = ({ label, items, isCorrect, delayFadeIn }) => {
+  textColor: string
+}> = ({ label, items, isCorrect, delayFadeIn, textColor }) => {
   const headerOpacity = useFadeIn(delayFadeIn, 20)
   const colColors = isCorrect ? CORRECT_COLORS : WRONG_COLORS
 
@@ -96,7 +89,6 @@ const ComparisonColumn: React.FC<{
       overflow: 'hidden',
       background: colColors.dim,
     }}>
-      {/* 列头 */}
       <div style={{
         padding: '24px 32px',
         background: colColors.headerBg,
@@ -106,7 +98,6 @@ const ComparisonColumn: React.FC<{
         gap: 12,
         opacity: headerOpacity,
       }}>
-        {/* 列头图标 */}
         <div style={{
           width: 36,
           height: 36,
@@ -134,7 +125,6 @@ const ComparisonColumn: React.FC<{
         </div>
       </div>
 
-      {/* 条目列表 */}
       <div style={{
         display: 'flex',
         flexDirection: 'column',
@@ -143,7 +133,7 @@ const ComparisonColumn: React.FC<{
         flex: 1,
       }}>
         {items.map((item, i) => (
-          <ComparisonItem key={i} text={item} index={i} isCorrect={isCorrect} />
+          <ComparisonItem key={i} text={item} index={i} isCorrect={isCorrect} textColor={textColor} />
         ))}
       </div>
     </div>
@@ -151,9 +141,8 @@ const ComparisonColumn: React.FC<{
 }
 
 export const ComparisonSlide: React.FC<{ slide: ComparisonSlideType }> = ({ slide }) => {
+  const theme = useTheme()
   const titleOpacity = useFadeIn(0, 25)
-
-  // 字幕条显示标题
   const caption = slide.title
 
   return (
@@ -163,9 +152,8 @@ export const ComparisonSlide: React.FC<{ slide: ComparisonSlideType }> = ({ slid
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        padding: `${layout.paddingV - 12}px ${layout.paddingH}px`,
+        padding: `${theme.layout.paddingV - 12}px ${theme.layout.paddingH}px`,
       }}>
-        {/* 标题 */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -174,7 +162,6 @@ export const ComparisonSlide: React.FC<{ slide: ComparisonSlideType }> = ({ slid
           marginBottom: 36,
           opacity: titleOpacity,
         }}>
-          {/* 标题两侧的渐变线 */}
           <div style={{
             flex: 1,
             height: 1,
@@ -183,7 +170,7 @@ export const ComparisonSlide: React.FC<{ slide: ComparisonSlideType }> = ({ slid
           <h2 style={{
             fontSize: 56,
             fontWeight: 700,
-            color: colors.text,
+            color: theme.colors.text,
             margin: 0,
             letterSpacing: '-0.01em',
             whiteSpace: 'nowrap' as const,
@@ -197,7 +184,6 @@ export const ComparisonSlide: React.FC<{ slide: ComparisonSlideType }> = ({ slid
           }} />
         </div>
 
-        {/* 双列对比区域 */}
         <div style={{
           display: 'flex',
           gap: 36,
@@ -208,12 +194,14 @@ export const ComparisonSlide: React.FC<{ slide: ComparisonSlideType }> = ({ slid
             items={slide.wrong.items}
             isCorrect={false}
             delayFadeIn={15}
+            textColor={theme.colors.text}
           />
           <ComparisonColumn
             label={slide.correct.label}
             items={slide.correct.items}
             isCorrect={true}
             delayFadeIn={25}
+            textColor={theme.colors.text}
           />
         </div>
       </div>
